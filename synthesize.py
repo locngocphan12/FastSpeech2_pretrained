@@ -1,7 +1,7 @@
 import re
 import argparse
 from string import punctuation
-
+import librosa
 import torch
 import yaml
 import numpy as np
@@ -88,9 +88,13 @@ def synthesize(model, step, configs, vocoder, batchs, control_values):
     preprocess_config, model_config, train_config = configs
     pitch_control, energy_control, duration_control = control_values
 
+    total_time = 0.0
+    total_audio_duration = 0.0
+
     for batch in batchs:
         batch = to_device(batch, device)
         with torch.no_grad():
+            start_time = time.time()
             # Forward
             output = model(
                 *(batch[2:]),
@@ -98,6 +102,10 @@ def synthesize(model, step, configs, vocoder, batchs, control_values):
                 e_control=energy_control,
                 d_control=duration_control
             )
+            end_time = time.time()
+            inference_time = end_time - start_time
+            total_time += inference_time
+
             synth_samples(
                 batch,
                 output,
@@ -106,6 +114,17 @@ def synthesize(model, step, configs, vocoder, batchs, control_values):
                 preprocess_config,
                 train_config["path"]["result_path"],
             )
+
+            # Load the synthesized audio to get its duration
+            for id_name in batch[0]:
+                audio_path = os.path.join(train_config["path"]["result_path"], f"{id_name}.wav")
+                audio, sr = librosa.load(audio_path, sr=None)
+                audio_duration = len(audio) / sr
+                total_audio_duration += audio_duration
+    rtf = total_time / total_audio_duration
+    print(f"Total inference time: {total_time:.2f} seconds")
+    print(f"Total audio duration: {total_audio_duration:.2f} seconds")
+    print(f"RTF: {rtf:.4f}")
 
 
 if __name__ == "__main__":
